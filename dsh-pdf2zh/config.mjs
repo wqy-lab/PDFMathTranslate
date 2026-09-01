@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import path from "node:path";
 
 const DEFAULT_CONFIG = Object.freeze({
@@ -19,16 +20,19 @@ const DEFAULT_CONFIG = Object.freeze({
   langIn: "en",
   langOut: "zh",
   // JSON file mapping provider names -> {service, model, env}. API keys live
-  // in each provider's `env` here. Default: <plugin dir>/providers.json.
+  // in each provider's `env` here. Default: ~/.dsh/pdf2zh-providers.json
+  // (stable, survives plugin upgrades); falls back to <plugin dir>/providers.json.
   providersFile: "",
 });
 
 /** Load named providers from a JSON file: { name: {service, model, env} }. */
 export function loadProviders(input = {}, env = process.env) {
-  const file =
-    input.providersFile ||
-    env.PDF2ZH_PROVIDERS_FILE ||
-    path.join(import.meta.dirname, "providers.json");
+  const explicit =
+    input.providersFile || env.PDF2ZH_PROVIDERS_FILE;
+  const homeFile = path.join(homedir(), ".dsh", "pdf2zh-providers.json");
+  const devFile = path.join(import.meta.dirname, "providers.json");
+  // Explicit env/config wins; else ~/.dsh (stable); else plugin dir (dev).
+  const file = explicit || (existsSync(homeFile) ? homeFile : devFile);
   if (!existsSync(file)) return {};
   try {
     return JSON.parse(readFileSync(file, "utf8"));

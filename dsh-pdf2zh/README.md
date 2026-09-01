@@ -73,17 +73,16 @@ restart DSH. The agent will then have the three `pdf2zh_*` tools.
 
 ### 3.1 Copy the provider template
 
-The plugin reads all translation services from `providers.json` (never committed;
-API keys live there). Create it from the template:
+The plugin reads all translation services from a providers file (never committed;
+API keys live there). It looks for it, in order: `PDF2ZH_PROVIDERS_FILE` env,
+then `~/.dsh/pdf2zh-providers.json` (default, survives upgrades), then the
+plugin directory's `providers.json` (dev). Create it from the template:
 
 ```powershell
-Copy-Item dsh-pdf2zh\providers.example.json dsh-pdf2zh\providers.json
+Copy-Item "<plugin dir>\providers.example.json" "$env:USERPROFILE\.dsh\pdf2zh-providers.json"
 ```
 
-> **pnpm-managed installs**: if the plugin lives in `node_modules/dsh-pdf2zh`
-> (installed from npm), pnpm may wipe that folder on reinstall. Prefer keeping
-> the real providers file elsewhere, e.g. `~/.dsh/pdf2zh-providers.json`, and
-> point the plugin at it: `setx PDF2ZH_PROVIDERS_FILE "C:\Users\<you>\.dsh\pdf2zh-providers.json"`.
+No env var needed — the plugin auto-reads `~/.dsh/pdf2zh-providers.json`.
 
 ### 3.2 Fill in your providers
 
