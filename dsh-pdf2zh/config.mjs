@@ -2,10 +2,12 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 const DEFAULT_CONFIG = Object.freeze({
-  // Python interpreter of the pdf2zh conda env (runs `python -m pdf2zh.pdf2zh`).
-  python: "C:\\Users\\WqYlearnph\\.conda\\envs\\pdftranslate\\python.exe",
-  // Repo root containing pdf2zh source + tools/notes2viking.py.
-  repo: "E:\\Project\\PDFMathTranslate",
+  // Python interpreter that has pdf2zh installed. Override per-machine with
+  // PDF2ZH_PYTHON (e.g. a conda env's python.exe). Default "python" uses PATH.
+  python: "python",
+  // Root of a pdf2zh checkout that contains tools/notes2viking.py. Override
+  // with PDF2ZH_REPO. If empty, the plugin falls back to the working directory.
+  repo: "",
   // OpenViking server base URL (for the ingest REST call).
   server: "http://127.0.0.1:1933",
   // Thread limit fix for the scipy-openblas "memory allocation failed" issue.

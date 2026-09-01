@@ -1,6 +1,7 @@
 import path from "node:path";
+import { existsSync } from "node:fs";
 import { defineTool } from "@deepseek-ai/dsh-tools";
-import { runCommand, httpPostJson, stripAnsi } from "./runner.mjs";
+import { runCommand, stripAnsi } from "./runner.mjs";
 
 function textTool(definition) {
   return defineTool({
@@ -29,6 +30,11 @@ function resolveService(config, svc) {
   return { arg: `${provider.service}${modelSuffix}`, env: provider.env || {} };
 }
 
+/** Repo root: explicit config, or fall back to the working directory. */
+function repoRoot(config) {
+  return config.repo || process.cwd();
+}
+
 /** Run `python -m pdf2zh.pdf2zh` to translate + export notes JSONL. */
 async function doTranslate(config, { pdf, service, lang_in, lang_out, output }) {
   const svc = service || config.service;
@@ -51,7 +57,7 @@ async function doTranslate(config, { pdf, service, lang_in, lang_out, output }) 
       "-o", outDir,
     ],
     {
-      cwd: config.repo,
+      cwd: repoRoot(config),
       env: { ...providerEnv, OPENBLAS_NUM_THREADS: config.openblasThreads },
     },
   );
@@ -66,9 +72,13 @@ async function doTranslate(config, { pdf, service, lang_in, lang_out, output }) 
   };
 }
 
-/** Ingest a -notes.jsonl into OpenViking via tools/notes2viking.py --run. */
+/** Ingest a -notes.jsonl into OpenViking via notes2viking.py --run. */
 async function doIngest(config, { jsonl, viking_uri }) {
-  const script = path.join(config.repo, "tools", "notes2viking.py");
+  // Prefer the bundled copy shipped with the plugin; fall back to a repo copy.
+  const bundled = path.join(import.meta.dirname, "notes2viking.py");
+  const script = existsSync(bundled)
+    ? bundled
+    : path.join(repoRoot(config), "tools", "notes2viking.py");
   const r = await runCommand(
     config.python,
     [script, jsonl, "--to", viking_uri, "--run", "--server", config.server],

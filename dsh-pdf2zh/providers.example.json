@@ -1,0 +1,27 @@
+{
+  "deepseek": {
+    "service": "deepseek",
+    "model": "deepseek-v4-flash",
+    "env": {
+      "DEEPSEEK_API_KEY": "sk-REPLACE_WITH_YOUR_KEY",
+      "DEEPSEEK_BASE_URL": "https://api.deepseek.com/v1"
+    }
+  },
+  "openai": {
+    "service": "openai",
+    "model": "gpt-4o-mini",
+    "env": {
+      "OPENAI_API_KEY": "sk-REPLACE_WITH_YOUR_KEY",
+      "OPENAI_BASE_URL": "https://api.openai.com/v1"
+    }
+  },
+  "custom": {
+    "service": "custom",
+    "model": "deepseek-v4-flash",
+    "env": {
+      "CUSTOM_API_KEY": "REPLACE_WITH_YOUR_KEY",
+      "CUSTOM_BASE_URL": "https://YOUR_ENDPOINT/v1"
+    }
+  },
+  "google": { "service": "google", "model": "", "env": {} }
+}

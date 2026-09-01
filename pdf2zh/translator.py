@@ -1076,10 +1076,17 @@ class DeepseekTranslator(OpenAITranslator):
         self, lang_in, lang_out, model, envs=None, prompt=None, ignore_cache=False
     ):
         self.set_envs(envs)
-        base_url = self.envs["DEEPSEEK_BASE_URL"]
-        api_key = self.envs["DEEPSEEK_API_KEY"]
+        # Defensive: a stale ConfigManager-stored deepseek config (saved before
+        # DEEPSEEK_BASE_URL existed) may lack these keys, so fall back to defaults.
+        base_url = self.envs.get("DEEPSEEK_BASE_URL") or "https://api.deepseek.com/v1"
+        api_key = self.envs.get("DEEPSEEK_API_KEY")
+        if not api_key:
+            raise ValueError(
+                "DEEPSEEK_API_KEY is not set. Set it in providers.json (deepseek "
+                "provider env), or as an environment variable."
+            )
         if not model:
-            model = self.envs["DEEPSEEK_MODEL"]
+            model = self.envs.get("DEEPSEEK_MODEL") or "deepseek-chat"
         super().__init__(
             lang_in,
             lang_out,
@@ -1113,10 +1120,15 @@ class CustomTranslator(OpenAITranslator):
         self, lang_in, lang_out, model, envs=None, prompt=None, ignore_cache=False
     ):
         self.set_envs(envs)
-        base_url = self.envs["CUSTOM_BASE_URL"]
-        api_key = self.envs["CUSTOM_API_KEY"]
+        base_url = self.envs.get("CUSTOM_BASE_URL")
+        api_key = self.envs.get("CUSTOM_API_KEY")
         if not model:
-            model = self.envs["CUSTOM_MODEL"]
+            model = self.envs.get("CUSTOM_MODEL") or "deepseek-chat"
+        if not base_url or not api_key:
+            raise ValueError(
+                "CustomTranslator needs CUSTOM_BASE_URL and CUSTOM_API_KEY "
+                "(set them in the provider's env, or as environment variables)."
+            )
         super().__init__(
             lang_in,
             lang_out,

@@ -1,0 +1,22 @@
+DeepSeek Harness plugin: PDF translation + structured notes + OpenViking ingestion
+Copyright 2026 WqYlearnph
+
+This product includes software developed as a derivative of:
+
+  @openviking/dsh-memory-plugin
+  Copyright (c) 2026 Beijing Volcano Engine Technology Co., Ltd.
+  Licensed under the Apache License, Version 2.0
+  https://github.com/volcengine/OpenViking
+
+This plugin's plugin-bootstrap skeleton (cordis.patch.yml registration,
+index.mjs apply() shape, and the textTool wrapper around defineTool in
+tools.mjs) is adapted from the OpenViking memory plugin above and modified for
+the pdf2zh workflow. All other code (translation orchestration, provider
+configuration, and OpenViking ingestion) is original.
+
+Modifications to the OpenViking-derived files:
+  - cordis.patch.yml  : adapted to register this plugin's tool group
+  - index.mjs         : simplified apply() (no session/recall hooks)
+  - tools.mjs         : textTool wrapper reused; all tool logic rewritten
+
+Distributed under the Apache License, Version 2.0 (see LICENSE).

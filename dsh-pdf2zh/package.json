@@ -12,9 +12,14 @@
     "tools.mjs",
     "config.mjs",
     "runner.mjs",
+    "notes2viking.py",
     "cordis.patch.yml",
-    "providers.json",
-    "README.md"
+    "providers.example.json",
+    "pdf2zh-notes.patch",
+    "setup-pdf2zh-notes.ps1",
+    "README.md",
+    "LICENSE",
+    "NOTICE"
   ],
   "dsh": {
     "bundle": {
@@ -30,5 +35,6 @@
   "engines": {
     "node": "^22.19.0 || >=24"
   },
-  "license": "MIT"
+  "license": "Apache-2.0",
+  "author": "WqYlearnph"
 }
