@@ -27,8 +27,7 @@ const DEFAULT_CONFIG = Object.freeze({
 
 /** Load named providers from a JSON file: { name: {service, model, env} }. */
 export function loadProviders(input = {}, env = process.env) {
-  const explicit =
-    input.providersFile || env.PDF2ZH_PROVIDERS_FILE;
+  const explicit = input.providersFile || env.PDF2ZH_PROVIDERS_FILE;
   const homeFile = path.join(homedir(), ".dsh", "pdf2zh-providers.json");
   const devFile = path.join(import.meta.dirname, "providers.json");
   // Explicit env/config wins; else ~/.dsh (stable); else plugin dir (dev).
@@ -41,18 +40,47 @@ export function loadProviders(input = {}, env = process.env) {
   }
 }
 
+/**
+ * Optional machine-level config file at ~/.dsh/pdf2zh-config.json, e.g.
+ * {"python": "C:\\...\\python.exe", "repo": "C:\\...", "service": "deepseek"}.
+ * Read at plugin load; more reliable than env vars (no env-propagation issues).
+ */
+export function loadConfigFile(input = {}, env = process.env) {
+  const file =
+    input.configFile || env.PDF2ZH_CONFIG_FILE ||
+    path.join(homedir(), ".dsh", "pdf2zh-config.json");
+  if (!existsSync(file)) return {};
+  try {
+    return JSON.parse(readFileSync(file, "utf8"));
+  } catch {
+    return {};
+  }
+}
+
 export function resolveConfig(input = {}, env = process.env) {
+  const fileCfg = loadConfigFile(input, env);
+  // Precedence: input (cordis) > env vars > config file > defaults.
+  const pick = (key, envName) => {
+    const keys = ["python", "repo", "server", "openblasThreads", "service", "langIn", "langOut"];
+    if (!keys.includes(key)) return undefined;
+    return (
+      input[key] ??
+      env[envName] ??
+      fileCfg[key] ??
+      DEFAULT_CONFIG[key]
+    );
+  };
   const config = {
     ...DEFAULT_CONFIG,
+    ...fileCfg,
     ...input,
-    python: input.python || env.PDF2ZH_PYTHON || DEFAULT_CONFIG.python,
-    repo: input.repo || env.PDF2ZH_REPO || DEFAULT_CONFIG.repo,
-    server: input.server || env.PDF2ZH_SERVER || DEFAULT_CONFIG.server,
-    openblasThreads:
-      input.openblasThreads || env.PDF2ZH_OPENBLAS_THREADS || DEFAULT_CONFIG.openblasThreads,
-    service: input.service || env.PDF2ZH_SERVICE || DEFAULT_CONFIG.service,
-    langIn: input.langIn || env.PDF2ZH_LANG_IN || DEFAULT_CONFIG.langIn,
-    langOut: input.langOut || env.PDF2ZH_LANG_OUT || DEFAULT_CONFIG.langOut,
+    python: pick("python", "PDF2ZH_PYTHON"),
+    repo: pick("repo", "PDF2ZH_REPO"),
+    server: pick("server", "PDF2ZH_SERVER"),
+    openblasThreads: pick("openblasThreads", "PDF2ZH_OPENBLAS_THREADS"),
+    service: pick("service", "PDF2ZH_SERVICE"),
+    langIn: pick("langIn", "PDF2ZH_LANG_IN"),
+    langOut: pick("langOut", "PDF2ZH_LANG_OUT"),
   };
   config.providers = loadProviders(input, env);
   return config;
