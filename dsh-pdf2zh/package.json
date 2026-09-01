@@ -1,6 +1,6 @@
 {
   "name": "dsh-pdf2zh",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "DeepSeek Harness plugin: PDF translation + structured notes + OpenViking ingestion",
   "type": "module",
   "main": "index.mjs",
