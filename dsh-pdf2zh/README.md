@@ -33,7 +33,7 @@ This plugin drives pdf2zh's `--notes --notes-format jsonl` pipeline, which is
 feature:
 
 ```powershell
-pip install git+https://github.com/<your-github-username>/PDFMathTranslate.git
+pip install git+https://github.com/wqy-lab/PDFMathTranslate.git
 ```
 
 Then point the plugin at that Python:
