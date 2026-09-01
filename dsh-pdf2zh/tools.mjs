@@ -1,5 +1,5 @@
 import path from "node:path";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { defineTool } from "@deepseek-ai/dsh-tools";
 import { runCommand, stripAnsi } from "./runner.mjs";
 
@@ -44,6 +44,7 @@ async function doTranslate(config, { pdf, service, lang_in, lang_out, output }) 
   const outDir = output || path.dirname(path.resolve(pdf));
   const stem = path.basename(pdf, path.extname(pdf));
   const jsonl = path.join(outDir, `${stem}-notes.jsonl`);
+  if (outDir) mkdirSync(outDir, { recursive: true });
 
   const r = await runCommand(
     config.python,
