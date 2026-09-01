@@ -201,6 +201,29 @@ def create_parser() -> argparse.ArgumentParser:
     )
 
     parse_params.add_argument(
+        "--notes",
+        action="store_true",
+        help="Export intermediate per-paragraph text (source + translation, "
+        "with heading structure) as Markdown for an external agent to turn "
+        "into reading notes.",
+    )
+
+    parse_params.add_argument(
+        "--notes-format",
+        type=str,
+        choices=["md", "jsonl", "both"],
+        default="md",
+        help="Format of the exported notes artifact: md, jsonl, or both.",
+    )
+
+    parse_params.add_argument(
+        "--notes-output",
+        type=str,
+        default="",
+        help="Output directory for notes files (default: same as --output).",
+    )
+
+    parse_params.add_argument(
         "--mcp", action="store_true", help="Launch pdf2zh MCP server in STDIO mode"
     )
 
@@ -259,15 +282,12 @@ def main(args: Optional[List[str]] = None) -> int:
 
     logging.basicConfig(level=logging.INFO, handlers=[RichHandler()])
 
-    # disable httpx, openai, httpcore, http11 logs
-    logging.getLogger("httpx").setLevel("CRITICAL")
-    logging.getLogger("httpx").propagate = False
-    logging.getLogger("openai").setLevel("CRITICAL")
-    logging.getLogger("openai").propagate = False
-    logging.getLogger("httpcore").setLevel("CRITICAL")
-    logging.getLogger("httpcore").propagate = False
-    logging.getLogger("http11").setLevel("CRITICAL")
-    logging.getLogger("http11").propagate = False
+    # disable HTTP client / SDK logs.
+    # Note: openai>=3 depends on httpx2/httpcore2 (a renamed httpx), which is
+    # why those logger names are included alongside httpx/httpcore.
+    for _name in ("httpx", "httpx2", "httpcore", "httpcore2", "openai", "http11"):
+        logging.getLogger(_name).setLevel("CRITICAL")
+        logging.getLogger(_name).propagate = False
 
     if parsed_args.config:
         from pdf2zh.config import ConfigManager
@@ -371,6 +391,9 @@ def main(args: Optional[List[str]] = None) -> int:
         ignore_cache=parsed_args.ignore_cache,
         compatible=parsed_args.compatible,
         debug=parsed_args.debug,
+        notes=parsed_args.notes,
+        notes_format=parsed_args.notes_format,
+        notes_output=parsed_args.notes_output,
     )
     kernel.translate(request)
     return 0
@@ -434,6 +457,7 @@ def yadt_main(parsed_args) -> int:
         GrokTranslator,
         GroqTranslator,
         DeepseekTranslator,
+        CustomTranslator,
         OpenAIlikedTranslator,
         QwenMtTranslator,
         X302AITranslator,
@@ -460,6 +484,7 @@ def yadt_main(parsed_args) -> int:
         GrokTranslator,
         GroqTranslator,
         DeepseekTranslator,
+        CustomTranslator,
         OpenAIlikedTranslator,
         QwenMtTranslator,
         X302AITranslator,

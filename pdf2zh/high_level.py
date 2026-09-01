@@ -26,6 +26,7 @@ from pymupdf import Document, Font
 
 from pdf2zh.converter import TranslateConverter
 from pdf2zh.doclayout import OnnxModel
+from pdf2zh.notes import NoteExporter, NoteGenerator
 from pdf2zh.pdfinterp import PDFPageInterpreterEx
 
 from pdf2zh.config import ConfigManager
@@ -87,10 +88,12 @@ def translate_patch(
     envs: Dict = None,
     prompt: Template = None,
     ignore_cache: bool = False,
+    on_page: object = None,
     **kwarg: Any,
 ) -> None:
     rsrcmgr = PDFResourceManager()
     layout = {}
+    title_layout = {}
     device = TranslateConverter(
         rsrcmgr,
         vfont,
@@ -105,6 +108,8 @@ def translate_patch(
         envs,
         prompt,
         ignore_cache,
+        title_layout=title_layout,
+        on_page=on_page,
     )
 
     assert device is not None
@@ -135,6 +140,7 @@ def translate_patch(
             # kdtree 是不可能 kdtree 的，不如直接渲染成图片，用空间换时间
             box = np.ones((pix.height, pix.width))
             h, w = box.shape
+            title_box = np.zeros((pix.height, pix.width), dtype=np.int8)
             vcls = ["abandon", "figure", "table", "isolate_formula", "formula_caption"]
             for i, d in enumerate(page_layout.boxes):
                 if page_layout.names[int(d.cls)] not in vcls:
@@ -157,6 +163,17 @@ def translate_patch(
                     )
                     box[y0:y1, x0:x1] = 0
             layout[page.pageno] = box
+            for d in page_layout.boxes:
+                if page_layout.names[int(d.cls)] == "title":
+                    x0, y0, x1, y1 = d.xyxy.squeeze()
+                    x0, y0, x1, y1 = (
+                        np.clip(int(x0 - 1), 0, w - 1),
+                        np.clip(int(h - y1 - 1), 0, h - 1),
+                        np.clip(int(x1 + 1), 0, w - 1),
+                        np.clip(int(h - y0 + 1), 0, h - 1),
+                    )
+                    title_box[y0:y1, x0:x1] = 1
+            title_layout[page.pageno] = title_box
             # 新建一个 xref 存放新指令流
             page.page_xref = doc_zh.get_new_xref()  # hack 插入页面的新 xref
             doc_zh.update_object(page.page_xref, "<<>>")
@@ -184,6 +201,7 @@ def translate_stream(
     prompt: Template = None,
     skip_subset_fonts: bool = False,
     ignore_cache: bool = False,
+    on_page: object = None,
     **kwarg: Any,
 ):
     font_list = [("tiro", None)]
@@ -319,6 +337,9 @@ def translate(
     prompt: Template = None,
     skip_subset_fonts: bool = False,
     ignore_cache: bool = False,
+    notes: bool = False,
+    notes_format: str = "md",
+    notes_output: str = "",
     **kwarg: Any,
 ):
     if not files:
@@ -390,8 +411,10 @@ def translate(
         except Exception:
             logger.warning(f"Failed to clean temp file {file_path}", exc_info=True)
 
+        exporter = NoteExporter() if notes else None
         s_mono, s_dual = translate_stream(
             s_raw,
+            on_page=exporter.on_page if exporter is not None else None,
             **locals(),
         )
         file_mono = Path(output) / f"{filename}-mono.pdf"
@@ -402,9 +425,64 @@ def translate(
         doc_dual.write(s_dual)
         doc_mono.close()
         doc_dual.close()
-        result_files.append((str(file_mono), str(file_dual)))
+
+        notes_md = None
+        if exporter is not None:
+            meta = {
+                "source": os.path.basename(file),
+                "pages": exporter.page_count,
+                "lang_in": lang_in,
+                "lang_out": lang_out,
+                "service": service,
+            }
+            notes_dir = notes_output or output
+
+            chat_fn = _get_chat_fn(
+                service, lang_in, lang_out, envs, prompt, ignore_cache
+            )
+            if chat_fn is not None:
+                # 一体化：调用翻译同一 LLM 生成章节精读笔记
+                meta = exporter.prepare(meta)
+                generator = NoteGenerator(chat_fn, lang=lang_out)
+                notes_text = generator.generate(exporter.records, meta)
+                out = Path(notes_dir)
+                out.mkdir(parents=True, exist_ok=True)
+                notes_path = out / f"{filename}-notes.md"
+                notes_path.write_text(notes_text, encoding="utf-8")
+                notes_md = str(notes_path)
+                if notes_format in ("jsonl", "both"):
+                    exporter.write_jsonl(notes_dir, filename)
+            else:
+                # 降级：翻译服务不是 chat 型，导出结构化中间文本
+                written = exporter.write(notes_dir, filename, meta, notes_format)
+                notes_md = next(
+                    (p for p in written if p.endswith(".md")),
+                    written[0] if written else None,
+                )
+
+        result_files.append((str(file_mono), str(file_dual), notes_md))
 
     return result_files
+
+
+def _get_chat_fn(service, lang_in, lang_out, envs, prompt, ignore_cache):
+    """Return the translator's ``chat`` callable if the service supports chat."""
+    from pdf2zh.translator import create_translator
+
+    try:
+        translator = create_translator(
+            service,
+            lang_in,
+            lang_out,
+            envs=envs,
+            prompt=prompt,
+            ignore_cache=ignore_cache,
+        )
+    except ValueError:
+        return None
+    if getattr(translator, "chat_capable", False):
+        return translator.chat
+    return None
 
 
 def download_remote_fonts(lang: str):

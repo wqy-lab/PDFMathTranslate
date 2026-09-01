@@ -1,0 +1,9 @@
+- insert:
+    - id: dsh-pdf2zh
+      name: '@deepseek-ai/cordis-plugin-group'
+      group: true
+      isolate:
+        pdf2zh: true
+      config:
+        - id: dsh-pdf2zh-runtime
+          name: 'dsh-pdf2zh'

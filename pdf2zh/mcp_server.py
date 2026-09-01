@@ -68,6 +68,70 @@ def create_mcp_app() -> FastMCP:
     dual pdf file: {doc_dual.absolute()}
     """
 
+    @mcp.tool()
+    async def extract_pdf_text(
+        file: str, lang_in: str, lang_out: str, ctx: Context
+    ) -> str:
+        """
+        Extract structured per-paragraph text (source + translation, with
+        heading structure, page markers and formulas) from a PDF/Word file,
+        and write it as a Markdown file for an agent to turn into
+        chapter-level reading notes. Argument `file` is the absolute path of
+        the input pdf/doc/docx; `lang_in`/`lang_out` are google-style language
+        codes (`lang_in` may be `auto`). Returns the path of the written
+        Markdown notes file.
+        """
+
+        _converted_pdf = None
+        if is_convertible(file):
+            _converted_pdf = convert_to_pdf(file)
+            original_name = os.path.splitext(os.path.basename(file))[0]
+            file = _converted_pdf
+        else:
+            original_name = None
+
+        with open(file, "rb") as f:
+            file_bytes = f.read()
+
+        from pdf2zh.notes import NoteExporter
+
+        exporter = NoteExporter()
+        await ctx.log(level="info", message=f"start extract {file}")
+        with contextlib.redirect_stdout(io.StringIO()):
+            translate_stream(
+                file_bytes,
+                lang_in=lang_in,
+                lang_out=lang_out,
+                service="google",
+                model=ModelInstance.value,
+                thread=4,
+                on_page=exporter.on_page,
+            )
+        await ctx.log(level="info", message="extract complete")
+
+        output_path = Path(os.path.dirname(file))
+        filename = original_name or os.path.splitext(os.path.basename(file))[0]
+        meta = {
+            "source": os.path.basename(file),
+            "pages": exporter.page_count,
+            "lang_in": lang_in,
+            "lang_out": lang_out,
+            "service": "google",
+        }
+        written = exporter.write(str(output_path), filename, meta, "md")
+        notes_path = written[0] if written else None
+
+        if _converted_pdf:
+            try:
+                os.unlink(_converted_pdf)
+            except OSError:
+                pass
+        return f"""------------
+    extract complete
+    notes markdown file: {notes_path}
+    paragraphs: {len(exporter.records)}
+    """
+
     return mcp
 
 

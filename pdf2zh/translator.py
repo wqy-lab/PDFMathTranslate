@@ -14,12 +14,20 @@ import requests
 import xinference_client
 from azure.ai.translation.text import TextTranslationClient
 from azure.core.credentials import AzureKeyCredential
-from tencentcloud.common import credential
-from tencentcloud.tmt.v20180321.models import (
-    TextTranslateRequest,
-    TextTranslateResponse,
-)
-from tencentcloud.tmt.v20180321.tmt_client import TmtClient
+
+# tencentcloud is an optional dependency: some SDK versions only ship the
+# image-translate models and lack the classic TMT text API used below.
+try:
+    from tencentcloud.common import credential
+    from tencentcloud.tmt.v20180321.models import (
+        TextTranslateRequest,
+        TextTranslateResponse,
+    )
+    from tencentcloud.tmt.v20180321.tmt_client import TmtClient
+
+    _TENCENT_AVAILABLE = True
+except ImportError:  # pragma: no cover - depends on installed SDK version
+    _TENCENT_AVAILABLE = False
 
 from pdf2zh.cache import TranslationCache
 from pdf2zh.config import ConfigManager
@@ -41,6 +49,9 @@ class BaseTranslator:
     envs = {}
     lang_map: dict[str, str] = {}
     CustomPrompt = False
+    # Whether this translator can answer arbitrary chat requests (used for
+    # LLM note generation). Chat-capable subclasses set this to True.
+    chat_capable = False
 
     def __init__(self, lang_in: str, lang_out: str, model: str, ignore_cache: bool):
         lang_in = self.lang_map.get(lang_in.lower(), lang_in)
@@ -161,6 +172,16 @@ class BaseTranslator:
         return self.get_rich_text_left_placeholder(
             id
         ) + self.get_rich_text_right_placeholder(id)
+
+    def chat(self, messages: list[dict], max_tokens: int | None = None) -> str:
+        """Send an arbitrary chat-completion request via the same client.
+
+        Used for non-translation LLM tasks such as reading-note generation.
+        Only chat-capable translators override this method.
+        """
+        raise NotImplementedError(
+            f"Translator '{self.name}' does not support chat-based note generation."
+        )
 
 
 class GoogleTranslator(BaseTranslator):
@@ -300,6 +321,7 @@ class OllamaTranslator(BaseTranslator):
         "OLLAMA_MODEL": "gemma2",
     }
     CustomPrompt = True
+    chat_capable = True
 
     def __init__(
         self,
@@ -344,6 +366,12 @@ class OllamaTranslator(BaseTranslator):
         :return: Text without a thought chain
         """
         return re.sub(r"^<think>.+?</think>", "", content, count=1, flags=re.DOTALL)
+
+    def chat(self, messages: list[dict], max_tokens: int | None = None) -> str:
+        options = {"temperature": 0.3, "num_predict": max_tokens or 4000}
+        response = self.client.chat(model=self.model, messages=messages, options=options)
+        content = self._remove_cot_content(response.message.content or "")
+        return content.strip()
 
 
 class XinferenceTranslator(BaseTranslator):
@@ -409,6 +437,7 @@ class OpenAITranslator(BaseTranslator):
         "OPENAI_MAX_TOKENS": -1,  # Specify -1 to call the API without setting max_tokens
     }
     CustomPrompt = True
+    chat_capable = True
 
     def __init__(
         self,
@@ -490,6 +519,23 @@ class OpenAITranslator(BaseTranslator):
         content = self.think_filter_regex.sub("", content).strip()
         return content
 
+    def chat(self, messages: list[dict], max_tokens: int | None = None) -> str:
+        options = {"temperature": 0.3}
+        if max_tokens:
+            options["max_tokens"] = max_tokens
+        response = self.client.chat.completions.create(
+            model=self.model,
+            **options,
+            messages=messages,
+            stream=False,
+        )
+        if not response.choices:
+            if hasattr(response, "error"):
+                raise ValueError("Error response from Service", response.error)
+            return ""
+        content = response.choices[0].message.content or ""
+        return self.think_filter_regex.sub("", content).strip()
+
     def get_formular_placeholder(self, id: int):
         return "{{v" + str(id) + "}}"
 
@@ -509,6 +555,7 @@ class AzureOpenAITranslator(BaseTranslator):
         "AZURE_OPENAI_API_VERSION": "2024-06-01",  # default api version
     }
     CustomPrompt = True
+    chat_capable = True
 
     def __init__(
         self,
@@ -547,6 +594,17 @@ class AzureOpenAITranslator(BaseTranslator):
             messages=self.prompt(text, self.prompttext),
         )
         return response.choices[0].message.content.strip()
+
+    def chat(self, messages: list[dict], max_tokens: int | None = None) -> str:
+        options = {"temperature": 0.3}
+        if max_tokens:
+            options["max_tokens"] = max_tokens
+        response = self.client.chat.completions.create(
+            model=self.model,
+            **options,
+            messages=messages,
+        )
+        return (response.choices[0].message.content or "").strip()
 
 
 class ModelScopeTranslator(OpenAITranslator):
@@ -763,6 +821,12 @@ class TencentTranslator(BaseTranslator):
     def __init__(
         self, lang_in, lang_out, model, envs=None, ignore_cache=False, **kwargs
     ):
+        if not _TENCENT_AVAILABLE:
+            raise ImportError(
+                "The installed tencentcloud-sdk-python does not provide "
+                "TextTranslateRequest; Tencent translation is unavailable. "
+                "Install a compatible tencentcloud SDK version to use -s tencent."
+            )
         self.set_envs(envs)
         super().__init__(lang_in, lang_out, model)
         try:
@@ -1003,6 +1067,7 @@ class DeepseekTranslator(OpenAITranslator):
     name = "deepseek"
     envs = {
         "DEEPSEEK_API_KEY": None,
+        "DEEPSEEK_BASE_URL": "https://api.deepseek.com/v1",
         "DEEPSEEK_MODEL": "deepseek-chat",
     }
     CustomPrompt = True
@@ -1011,10 +1076,47 @@ class DeepseekTranslator(OpenAITranslator):
         self, lang_in, lang_out, model, envs=None, prompt=None, ignore_cache=False
     ):
         self.set_envs(envs)
-        base_url = "https://api.deepseek.com/v1"
+        base_url = self.envs["DEEPSEEK_BASE_URL"]
         api_key = self.envs["DEEPSEEK_API_KEY"]
         if not model:
             model = self.envs["DEEPSEEK_MODEL"]
+        super().__init__(
+            lang_in,
+            lang_out,
+            model,
+            base_url=base_url,
+            api_key=api_key,
+            ignore_cache=ignore_cache,
+        )
+        self.prompttext = prompt
+
+
+class CustomTranslator(OpenAITranslator):
+    """Generic OpenAI-compatible translator: point translation (and LLM note
+    generation) at any endpoint/model of your choice.
+
+    Model: ``-s custom:<model>`` (or env ``CUSTOM_MODEL``). Endpoint + key come
+    from env ``CUSTOM_BASE_URL`` / ``CUSTOM_API_KEY``. This lets you route the
+    middle translation step to your own API, a proxy, or an external
+    agent/tool that exposes an OpenAI-compatible chat API.
+    """
+
+    name = "custom"
+    envs = {
+        "CUSTOM_BASE_URL": None,
+        "CUSTOM_API_KEY": None,
+        "CUSTOM_MODEL": "deepseek-chat",
+    }
+    CustomPrompt = True
+
+    def __init__(
+        self, lang_in, lang_out, model, envs=None, prompt=None, ignore_cache=False
+    ):
+        self.set_envs(envs)
+        base_url = self.envs["CUSTOM_BASE_URL"]
+        api_key = self.envs["CUSTOM_API_KEY"]
+        if not model:
+            model = self.envs["CUSTOM_MODEL"]
         super().__init__(
             lang_in,
             lang_out,
@@ -1196,3 +1298,59 @@ class QwenMtTranslator(OpenAITranslator):
             extra_body={"translation_options": translation_options},
         )
         return response.choices[0].message.content.strip()
+
+
+_TRANSLATORS = [
+    GoogleTranslator,
+    BingTranslator,
+    DeepLTranslator,
+    DeepLXTranslator,
+    OllamaTranslator,
+    XinferenceTranslator,
+    AzureOpenAITranslator,
+    OpenAITranslator,
+    ZhipuTranslator,
+    ModelScopeTranslator,
+    SiliconTranslator,
+    GeminiTranslator,
+    AzureTranslator,
+    TencentTranslator,
+    DifyTranslator,
+    AnythingLLMTranslator,
+    ArgosTranslator,
+    GrokTranslator,
+    GroqTranslator,
+    DeepseekTranslator,
+    CustomTranslator,
+    MiniMaxTranslator,
+    OpenAIlikedTranslator,
+    QwenMtTranslator,
+    X302AITranslator,
+]
+
+
+def create_translator(
+    service: str,
+    lang_in: str,
+    lang_out: str,
+    envs: dict | None = None,
+    prompt=None,
+    ignore_cache: bool = False,
+) -> BaseTranslator:
+    """Instantiate the translator matching ``service`` (e.g. 'openai:gpt-4o')."""
+    param = service.split(":", 1)
+    service_name = param[0]
+    service_model = param[1] if len(param) > 1 else None
+    if not envs:
+        envs = {}
+    for cls in _TRANSLATORS:
+        if service_name == cls.name:
+            return cls(
+                lang_in,
+                lang_out,
+                service_model,
+                envs=envs,
+                prompt=prompt,
+                ignore_cache=ignore_cache,
+            )
+    raise ValueError("Unsupported translation service")

@@ -15,33 +15,8 @@ from pdfminer.utils import apply_matrix_pt, mult_matrix
 from pymupdf import Font
 from tenacity import retry, wait_fixed
 
-from pdf2zh.translator import (
-    AnythingLLMTranslator,
-    ArgosTranslator,
-    AzureOpenAITranslator,
-    AzureTranslator,
-    BaseTranslator,
-    BingTranslator,
-    DeepLTranslator,
-    DeepLXTranslator,
-    DeepseekTranslator,
-    DifyTranslator,
-    GeminiTranslator,
-    GoogleTranslator,
-    GrokTranslator,
-    GroqTranslator,
-    MiniMaxTranslator,
-    ModelScopeTranslator,
-    OllamaTranslator,
-    OpenAIlikedTranslator,
-    OpenAITranslator,
-    QwenMtTranslator,
-    SiliconTranslator,
-    TencentTranslator,
-    XinferenceTranslator,
-    ZhipuTranslator,
-    X302AITranslator,
-)
+from pdf2zh.notes import ParagraphRecord, render_formula_placeholders
+from pdf2zh.translator import BaseTranslator, create_translator
 
 log = logging.getLogger(__name__)
 
@@ -145,6 +120,8 @@ class TranslateConverter(PDFConverterEx):
         envs: Dict = None,
         prompt: Template = None,
         ignore_cache: bool = False,
+        title_layout: dict = None,
+        on_page: object = None,
     ) -> None:
         super().__init__(rsrcmgr)
         self.vfont = vfont
@@ -153,24 +130,20 @@ class TranslateConverter(PDFConverterEx):
         self.layout = layout
         self.noto_name = noto_name
         self.noto = noto
+        self.title_layout = title_layout
+        self.on_page = on_page
         self.translator: BaseTranslator = None
-        # e.g. "ollama:gemma2:9b" -> ["ollama", "gemma2:9b"]
-        param = service.split(":", 1)
-        service_name = param[0]
-        service_model = param[1] if len(param) > 1 else None
-        if not envs:
-            envs = {}
-        for translator in [GoogleTranslator, BingTranslator, DeepLTranslator, DeepLXTranslator, OllamaTranslator, XinferenceTranslator, AzureOpenAITranslator,
-                           OpenAITranslator, ZhipuTranslator, ModelScopeTranslator, SiliconTranslator, GeminiTranslator, AzureTranslator, TencentTranslator, DifyTranslator, AnythingLLMTranslator, ArgosTranslator, GrokTranslator, GroqTranslator, DeepseekTranslator, MiniMaxTranslator, OpenAIlikedTranslator, QwenMtTranslator, X302AITranslator]:
-            if service_name == translator.name:
-                self.translator = translator(lang_in, lang_out, service_model, envs=envs, prompt=prompt, ignore_cache=ignore_cache)
-        if not self.translator:
-            raise ValueError("Unsupported translation service")
+        # Factory routes "service:model" (e.g. "deepseek:deepseek-v4-flash",
+        # "custom:my-model") to the matching translator class.
+        self.translator = create_translator(
+            service, lang_in, lang_out, envs=envs, prompt=prompt, ignore_cache=ignore_cache
+        )
 
     def receive_layout(self, ltpage: LTPage):
         # 段落
         sstk: list[str] = []            # 段落文字栈
         pstk: list[Paragraph] = []      # 段落属性栈
+        tstk: list[bool] = []           # 段落标题标记栈
         vbkt: int = 0                   # 段落公式括号计数
         # 公式组
         vstk: list[LTChar] = []         # 公式符号组
@@ -187,6 +160,9 @@ class TranslateConverter(PDFConverterEx):
         xt_cls: int = -1                # 上一个字符所属段落，保证无论第一个字符属于哪个类别都可以触发新段落
         vmax: float = ltpage.width / 4  # 行内公式最大宽度
         ops: str = ""                   # 渲染结果
+        title_mask = None               # 页级标题区域掩码（可选）
+        if self.title_layout is not None:
+            title_mask = self.title_layout.get(ltpage.pageid)
 
         def vflag(font: str, char: str):    # 匹配公式（和角标）字体
             if isinstance(font, bytes):     # 不一定能 decode，直接转 str
@@ -235,6 +211,7 @@ class TranslateConverter(PDFConverterEx):
                 # 读取当前字符在 layout 中的类别
                 cx, cy = np.clip(int(child.x0), 0, w - 1), np.clip(int(child.y0), 0, h - 1)
                 cls = layout[cy, cx]
+                cur_title = bool(title_mask is not None and title_mask[cy, cx])
                 # 锚定文档中 bullet 的位置
                 if child.get_text() == "•":
                     cls = 0
@@ -287,9 +264,11 @@ class TranslateConverter(PDFConverterEx):
                         elif child.x1 < xt.x0:      # 添加换行空格并标记原文段落存在换行
                             sstk[-1] += " "
                             pstk[-1].brk = True
+                        tstk[-1] = tstk[-1] or cur_title
                     else:                           # 根据当前字符构建一个新的段落
                         sstk.append("")
                         pstk.append(Paragraph(child.y0, child.x0, child.x0, child.x0, child.y0, child.y1, child.size, False))
+                        tstk.append(cur_title)
                 if not cur_v:                                               # 文字入栈
                     if (                                                    # 根据当前字符修正段落属性
                         child.size > pstk[-1].size                          # 1. 当前字符比段落字体大
@@ -362,6 +341,23 @@ class TranslateConverter(PDFConverterEx):
             max_workers=self.thread
         ) as executor:
             news = list(executor.map(worker, sstk))
+
+        # 旁路导出：把本页段落流（原文+译文+公式+坐标+标题标记）推给外部 collector
+        if self.on_page is not None:
+            records = []
+            for i, s in enumerate(sstk):
+                p = pstk[i]
+                records.append(
+                    ParagraphRecord(
+                        page=ltpage.pageid,
+                        text=render_formula_placeholders(s, var),
+                        translation=render_formula_placeholders(news[i], var),
+                        font_size=p.size,
+                        bbox=(p.x0, p.y0, p.x1, p.y1),
+                        is_title=bool(tstk[i]),
+                    )
+                )
+            self.on_page(ltpage.pageid, records)
 
         ############################################################
         # C. 新文档排版

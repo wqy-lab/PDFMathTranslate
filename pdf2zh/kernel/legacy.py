@@ -58,6 +58,9 @@ class LegacyKernel:
             "skip_subset_fonts": request.skip_subset_fonts,
             "ignore_cache": request.ignore_cache,
             "compatible": request.compatible,
+            "notes": request.notes,
+            "notes_format": request.notes_format,
+            "notes_output": request.notes_output,
         }
 
         if request.pages and isinstance(request.pages, list):
@@ -71,11 +74,12 @@ class LegacyKernel:
         result_files = translate(**kwargs)
 
         results = []
-        for mono_path, dual_path in result_files:
+        for mono_path, dual_path, notes_md in result_files:
             results.append(
                 TranslateResult(
                     mono_pdf=Path(mono_path),
                     dual_pdf=Path(dual_path),
+                    notes_md=Path(notes_md) if notes_md else None,
                 )
             )
         return results

@@ -27,6 +27,9 @@ class TranslateRequest:
     skip_subset_fonts: bool = False
     ignore_cache: bool = False
     compatible: bool = False
+    notes: bool = False
+    notes_format: str = "md"
+    notes_output: str = ""
 
 
 @dataclass
@@ -35,6 +38,7 @@ class TranslateResult:
 
     mono_pdf: Optional[Path | bytes] = None
     dual_pdf: Optional[Path | bytes] = None
+    notes_md: Optional[Path] = None
     time_cost: float = 0.0
 
 
