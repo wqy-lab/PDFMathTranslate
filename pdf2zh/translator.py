@@ -44,6 +44,31 @@ def remove_control_characters(s):
     return "".join(ch for ch in s if unicodedata.category(ch)[0] != "C")
 
 
+def _merge_system_into_user(messages: list[dict]) -> list[dict]:
+    """Fold any 'system' message into the first user message's content.
+
+    Some chat models (e.g. Aliyun qwen-mt) only accept roles ``user`` and
+    ``assistant``.  Prepend the accumulated system text to the first user turn
+    so the request stays valid without a system role.
+    """
+    system_parts: list[str] = []
+    out: list[dict] = []
+    for m in messages:
+        if m.get("role") == "system":
+            if m.get("content"):
+                system_parts.append(str(m["content"]))
+        else:
+            out.append(dict(m))
+    prefix = "\n\n".join(system_parts).strip()
+    if not prefix:
+        return out
+    if out and out[0].get("role") == "user":
+        out[0] = {**out[0], "content": f"{prefix}\n\n{out[0].get('content', '')}"}
+    else:
+        out.insert(0, {"role": "user", "content": prefix})
+    return out
+
+
 class BaseTranslator:
     name = "base"
     envs = {}
@@ -523,12 +548,24 @@ class OpenAITranslator(BaseTranslator):
         options = {"temperature": 0.3}
         if max_tokens:
             options["max_tokens"] = max_tokens
-        response = self.client.chat.completions.create(
-            model=self.model,
-            **options,
-            messages=messages,
-            stream=False,
-        )
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                **options,
+                messages=messages,
+                stream=False,
+            )
+        except openai.BadRequestError as e:
+            # Some models (e.g. Aliyun qwen-mt) only accept roles
+            # user/assistant and reject a separate "system" message.
+            if "Role must be" not in str(e):
+                raise
+            response = self.client.chat.completions.create(
+                model=self.model,
+                **options,
+                messages=_merge_system_into_user(messages),
+                stream=False,
+            )
         if not response.choices:
             if hasattr(response, "error"):
                 raise ValueError("Error response from Service", response.error)
