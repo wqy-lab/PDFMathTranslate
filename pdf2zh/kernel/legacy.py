@@ -61,6 +61,7 @@ class LegacyKernel:
             "notes": request.notes,
             "notes_format": request.notes_format,
             "notes_output": request.notes_output,
+            "notes_service": request.notes_service,
         }
 
         if request.pages and isinstance(request.pages, list):

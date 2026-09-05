@@ -30,6 +30,7 @@ class TranslateRequest:
     notes: bool = False
     notes_format: str = "md"
     notes_output: str = ""
+    notes_service: str = ""
 
 
 @dataclass

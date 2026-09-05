@@ -36,7 +36,7 @@ function repoRoot(config) {
 }
 
 /** Run `python -m pdf2zh.pdf2zh` to translate + export notes JSONL. */
-async function doTranslate(config, { pdf, service, lang_in, lang_out, output }) {
+async function doTranslate(config, { pdf, service, notes_service, lang_in, lang_out, output }) {
   const svc = service || config.service;
   const { arg: svcArg, env: providerEnv } = resolveService(config, svc);
   const li = lang_in || config.langIn;
@@ -46,6 +46,16 @@ async function doTranslate(config, { pdf, service, lang_in, lang_out, output }) 
   const jsonl = path.join(outDir, `${stem}-notes.jsonl`);
   if (outDir) mkdirSync(outDir, { recursive: true });
 
+  // Optional separate service for LLM note generation (e.g. translation via
+  // aliyun/qwen-mt, notes via deepseek). Merge both providers' env vars.
+  let notesArg = [];
+  let notesEnv = {};
+  if (notes_service) {
+    const { arg, env } = resolveService(config, notes_service);
+    notesArg = ["--notes-service", arg];
+    notesEnv = env;
+  }
+
   const r = await runCommand(
     config.python,
     [
@@ -53,13 +63,14 @@ async function doTranslate(config, { pdf, service, lang_in, lang_out, output }) 
       pdf,
       "--notes", "--notes-format", "jsonl",
       "-s", svcArg,
+      ...notesArg,
       "-li", li,
       "-lo", lo,
       "-o", outDir,
     ],
     {
       cwd: repoRoot(config),
-      env: { ...providerEnv, OPENBLAS_NUM_THREADS: config.openblasThreads },
+      env: { ...providerEnv, ...notesEnv, OPENBLAS_NUM_THREADS: config.openblasThreads },
     },
   );
 
@@ -103,6 +114,7 @@ export function registerPdf2zhTools(ctx, config) {
     parameters: {
       pdf: { type: "string", required: true, description: "Absolute path to the PDF (or .doc/.docx)." },
       service: { type: "string", description: "Provider name from providers.json (e.g. deepseek, google) or a raw service:model string. Default: config.service." },
+      notes_service: { type: "string", description: "Optional separate provider for LLM note generation (e.g. deepseek) when translation uses another service (e.g. aliyun)." },
       lang_in: { type: "string", description: "Source language code (default en)." },
       lang_out: { type: "string", description: "Target language code (default zh)." },
       output: { type: "string", description: "Output directory (default: the PDF's directory)." },
@@ -135,6 +147,7 @@ export function registerPdf2zhTools(ctx, config) {
       pdf: { type: "string", required: true, description: "Absolute path to the PDF." },
       viking_uri: { type: "string", required: true, description: "Target viking URI for the notes resource." },
       service: { type: "string", description: "Provider name from providers.json, or raw service:model (default: config.service)." },
+      notes_service: { type: "string", description: "Optional separate provider for LLM note generation (e.g. deepseek) when translation uses another service (e.g. aliyun)." },
       lang_in: { type: "string", description: "Source language (default en)." },
       lang_out: { type: "string", description: "Target language (default zh)." },
       output: { type: "string", description: "Output directory (default: the PDF's directory)." },

@@ -224,6 +224,14 @@ def create_parser() -> argparse.ArgumentParser:
     )
 
     parse_params.add_argument(
+        "--notes-service",
+        type=str,
+        default="",
+        help="Separate service for LLM note generation (default: same as --service). "
+        "Useful when translation and notes should use different providers.",
+    )
+
+    parse_params.add_argument(
         "--mcp", action="store_true", help="Launch pdf2zh MCP server in STDIO mode"
     )
 
@@ -394,6 +402,7 @@ def main(args: Optional[List[str]] = None) -> int:
         notes=parsed_args.notes,
         notes_format=parsed_args.notes_format,
         notes_output=parsed_args.notes_output,
+        notes_service=parsed_args.notes_service,
     )
     kernel.translate(request)
     return 0

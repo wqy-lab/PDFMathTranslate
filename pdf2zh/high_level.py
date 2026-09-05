@@ -340,6 +340,7 @@ def translate(
     notes: bool = False,
     notes_format: str = "md",
     notes_output: str = "",
+    notes_service: str = "",
     **kwarg: Any,
 ):
     if not files:
@@ -438,10 +439,15 @@ def translate(
             notes_dir = notes_output or output
 
             chat_fn = _get_chat_fn(
-                service, lang_in, lang_out, envs, prompt, ignore_cache
+                notes_service or service,
+                lang_in,
+                lang_out,
+                envs,
+                prompt,
+                ignore_cache,
             )
             if chat_fn is not None:
-                # 一体化：调用翻译同一 LLM 生成章节精读笔记
+                # 一体化：调用翻译同一 LLM（或 notes_service 指定的独立 LLM）生成章节精读笔记
                 meta = exporter.prepare(meta)
                 generator = NoteGenerator(chat_fn, lang=lang_out)
                 notes_text = generator.generate(exporter.records, meta)
